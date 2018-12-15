@@ -20,6 +20,8 @@ int high = 500;
 int low = 500;
 bool status_led = true;
 
+u_int64_t clock;
+
 void get_leds() {
     StaticJsonBuffer<200> jsonBuffer;
     JsonObject& jsonObj = jsonBuffer.createObject();
