@@ -3,6 +3,7 @@
 #include <ESP8266WebServer.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
+#include "sys_clock.hpp"
 
 #define HTTP_REST_PORT 80
 #define WIFI_RETRY_DELAY 500
@@ -20,7 +21,9 @@ int high = 500;
 int low = 500;
 bool status_led = true;
 
-u_int64_t clock;
+Sys_clock cookoo;
+
+
 
 void get_leds() {
     StaticJsonBuffer<200> jsonBuffer;
@@ -29,6 +32,51 @@ void get_leds() {
     jsonObj["status"] = led;
     jsonObj.prettyPrintTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
     http_rest_server.send(200, "application/json", JSONmessageBuffer);
+}
+
+void get_system_time(){
+    StaticJsonBuffer<200> jsonBuffer;
+    JsonObject& jsonObj = jsonBuffer.createObject();
+    char JSONmessageBuffer[200];
+
+    jsonObj["day"] = cookoo.get_day();
+    jsonObj["hour"] = cookoo.get_hour();
+    jsonObj["minute"] = cookoo.get_minute();
+    jsonObj["second"] = cookoo.get_second();
+
+    jsonObj.prettyPrintTo(JSONmessageBuffer, sizeof(JSONmessageBuffer));
+    http_rest_server.send(200, "application/json", JSONmessageBuffer);
+}
+
+void set_system_time(){
+
+    StaticJsonBuffer<500> jsonBuffer;
+    String post_body = http_rest_server.arg("plain");
+    JsonObject& jsonBody = jsonBuffer.parseObject(http_rest_server.arg("plain"));
+    short aux;
+
+    if (http_rest_server.method() == HTTP_POST) {
+        if (!jsonBody.success()) {
+            http_rest_server.send(400);
+        }else{
+            if(jsonBody.containsKey("second")){
+                aux = jsonBody["second"];
+                cookoo.set_second(aux);
+            }
+            if(jsonBody.containsKey("minute")){
+                aux = jsonBody["minute"];
+                cookoo.set_minute(aux);
+            }
+            if(jsonBody.containsKey("hour")){
+                aux = jsonBody["hour"];
+                cookoo.set_hour(aux);
+            }
+            http_rest_server.send(200);
+        }
+
+    }else{
+        http_rest_server.send(400);
+    }
 }
 
 void post_leds() {
@@ -79,7 +127,6 @@ void post_leds() {
     }
 }
 
-
 void config_rest_server_routing() {
 
     http_rest_server.on("/", HTTP_GET, []() {
@@ -89,6 +136,9 @@ void config_rest_server_routing() {
 
     http_rest_server.on("/leds", HTTP_GET, get_leds);
     http_rest_server.on("/leds", HTTP_POST, post_leds);
+    http_rest_server.on("/time", HTTP_GET, get_system_time);
+    http_rest_server.on("/time", HTTP_POST, set_system_time);
+
 
 
 }
@@ -108,8 +158,6 @@ int init_wifi() {
     }
     return WiFi.status(); // return the WiFi connection status
 }
-
-
 
 void run_blink(){
   if(status_led){
@@ -162,10 +210,21 @@ pinMode(LED_BUILTIN, OUTPUT);
  EEPROM.begin(10);
  EEPROM.get(0,high);
  EEPROM.get(5,low);
+
+ cookoo.start();
+
 }
 
 
 void loop() {
+
+    cookoo.run();
+
+    // Serial.print(cookoo.get_minute());
+    // Serial.print(":");
+    // Serial.println(cookoo.get_second());
+
+
 
     if(WiFi.status()== WL_CONNECTED)
     {
@@ -177,4 +236,6 @@ void loop() {
     }
     run_blink();
     digitalWrite(LED_BUILTIN, led);
+
+
 }
