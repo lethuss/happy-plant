@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include "sys_clock.hpp"
+#include <WiFiUdp.h>
 
 #define HTTP_REST_PORT 80
 #define WIFI_RETRY_DELAY 500
@@ -22,6 +23,23 @@ int low = 500;
 bool status_led = true;
 
 Sys_clock cookoo;
+
+
+
+// NTPPPPPPPPPPPPPP
+WiFiUDP UDP;                     // Create an instance of the WiFiUDP class to send and receive
+unsigned int timeUNIX = 0;
+
+// IPAddress timeServerIP;          // time.nist.gov NTP server address
+
+// IPAddress timeServerIP(200, 160, 7, 186);
+// IPAddress timeServerIP(201, 49, 148, 135);
+IPAddress timeServerIP[5] = {IPAddress(200, 160, 7, 186), IPAddress(201, 49, 148, 135), IPAddress(200, 186, 125, 195), IPAddress(200, 20, 186, 76), IPAddress(200, 160, 0, 8)};
+
+const int NTP_PACKET_SIZE = 48;  // NTP time stamp is in the first 48 bytes of the message
+
+byte NTPBuffer[NTP_PACKET_SIZE]; // buffer to hold incoming and outgoing packets
+// NTPPPPPPPPPPPPPP
 
 
 
@@ -183,7 +201,30 @@ void run_blink(){
   }
 }
 
+void sendNTPpacket(IPAddress& address) {
+  memset(NTPBuffer, 0, NTP_PACKET_SIZE);  // set all bytes in the buffer to 0
+  // Initialize values needed to form NTP request
+  NTPBuffer[0] = 0b11100011;   // LI, Version, Mode
+  // send a packet requesting a timestamp:
+  UDP.beginPacket(address, 123); // NTP requests are to port 123
+  UDP.write(NTPBuffer, NTP_PACKET_SIZE);
+  UDP.endPacket();
+}
 
+uint32_t getTime() {
+  if (UDP.parsePacket() == 0) { // If there's no response (yet)
+    return 0;
+  }
+  UDP.read(NTPBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
+  // Combine the 4 timestamp bytes into one 32-bit number
+  uint32_t NTPTime = (NTPBuffer[40] << 24) | (NTPBuffer[41] << 16) | (NTPBuffer[42] << 8) | NTPBuffer[43];
+  // Convert NTP time to a UNIX timestamp:
+  // Unix time starts on Jan 1 1970. That's 2208988800 seconds in NTP time:
+  const uint32_t seventyYears = 2208988800UL;
+  // subtract seventy years:
+  uint32_t UNIXTime = NTPTime - seventyYears;
+  return UNIXTime;
+}
 
 void setup()
 {
@@ -212,6 +253,37 @@ pinMode(LED_BUILTIN, OUTPUT);
  EEPROM.get(5,low);
 
  cookoo.start();
+ UDP.begin(123);
+
+ short server_count = 0;
+
+ while (!timeUNIX) {
+     sendNTPpacket(timeServerIP[server_count]);
+     delay(200);
+     uint32_t time = getTime();
+     if (time) {                                  // If a new timestamp has been received
+         timeUNIX = time;
+         Serial.print("NTP response:\t");
+         Serial.println(timeUNIX);
+     }else{
+         server_count++;
+         if (server_count == 5){
+             ESP.reset();
+         }
+     }
+ }
+
+cookoo.set_second(timeUNIX % 60);
+cookoo.set_minute((timeUNIX / 60) % 60);
+
+short hour = ((timeUNIX / 3600) % 24)-2 ;
+if (hour < 0){
+    hour +=24;
+}
+
+cookoo.set_hour(hour);
+
+
 
 }
 
@@ -219,12 +291,6 @@ pinMode(LED_BUILTIN, OUTPUT);
 void loop() {
 
     cookoo.run();
-
-    // Serial.print(cookoo.get_minute());
-    // Serial.print(":");
-    // Serial.println(cookoo.get_second());
-
-
 
     if(WiFi.status()== WL_CONNECTED)
     {
@@ -236,6 +302,9 @@ void loop() {
     }
     run_blink();
     digitalWrite(LED_BUILTIN, led);
+
+
+
 
 
 }
