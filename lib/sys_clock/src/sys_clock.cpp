@@ -11,6 +11,23 @@ Sys_clock::Sys_clock():
     second(0)
     {}
 
+Sys_timestamp::Sys_timestamp():
+    hour(0),
+    minute(0),
+    second(0)
+    {}
+
+Sys_timestamp::Sys_timestamp(short h, short m, short s):
+    hour(h),
+    minute(m),
+    second(s)
+    {}
+
+
+// Sys_timestamp & Sys_clock::get_timestamp(){
+//     return Sys_timestamp(hour, minute, second);
+// }
+
 int Sys_clock::get_year()
 {
     return year;
@@ -67,11 +84,11 @@ void Sys_clock::run()
 {
     resolve_seconds();
 
-    if (second == 61){
+    if (second == 60){
         second = 0;
         minute++;
     }
-    if (minute == 61){
+    if (minute == 60){
         minute = 0;
         hour++;
     }
@@ -80,6 +97,25 @@ void Sys_clock::run()
         day++;
     }
 }
+
+void Sys_clock::run_on_interrupt()
+{
+
+    second++;
+    if (second == 60){
+        second = 0;
+        minute++;
+    }
+    if (minute == 60){
+        minute = 0;
+        hour++;
+    }
+    if (hour == 24){
+        hour = 0;
+        day++;
+    }
+}
+
 void Sys_clock::set_time(short year_p, short month_p, short day_p, short hour_p, short minute_p, short second_p){
 
     if (year_p >=0)

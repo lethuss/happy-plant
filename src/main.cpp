@@ -10,6 +10,17 @@
 #define WIFI_RETRY_DELAY 500
 #define MAX_WIFI_INIT_RETRY 50
 
+enum state_machine {IDLE, WATERING};
+short current_state = IDLE;
+
+short water_hour = 0;
+short water_minute = 14;
+short water_second = 0;
+
+short water_duration = 3;
+bool just_watered = false;
+long water_start = 0;
+
 ESP8266WebServer http_rest_server(HTTP_REST_PORT);
 
 const char* wifi_ssid = "Ape CLT";
@@ -26,14 +37,11 @@ Sys_clock cookoo;
 
 
 
+
 // NTPPPPPPPPPPPPPP
 WiFiUDP UDP;                     // Create an instance of the WiFiUDP class to send and receive
 unsigned int timeUNIX = 0;
 
-// IPAddress timeServerIP;          // time.nist.gov NTP server address
-
-// IPAddress timeServerIP(200, 160, 7, 186);
-// IPAddress timeServerIP(201, 49, 148, 135);
 IPAddress timeServerIP[5] = {IPAddress(200, 160, 7, 186), IPAddress(201, 49, 148, 135), IPAddress(200, 186, 125, 195), IPAddress(200, 20, 186, 76), IPAddress(200, 160, 0, 8)};
 
 const int NTP_PACKET_SIZE = 48;  // NTP time stamp is in the first 48 bytes of the message
@@ -97,6 +105,46 @@ void set_system_time(){
     }
 }
 
+void set_water_time(){
+
+    StaticJsonBuffer<500> jsonBuffer;
+    String post_body = http_rest_server.arg("plain");
+    JsonObject& jsonBody = jsonBuffer.parseObject(http_rest_server.arg("plain"));
+    short aux;
+
+    if (http_rest_server.method() == HTTP_POST) {
+        if (!jsonBody.success()) {
+            http_rest_server.send(400);
+        }else{
+            if(jsonBody.containsKey("second")){
+                aux = jsonBody["second"];
+                water_second = aux;
+            }
+            if(jsonBody.containsKey("minute")){
+                aux = jsonBody["minute"];
+                water_minute = aux;
+            }
+            if(jsonBody.containsKey("hour")){
+                aux = jsonBody["hour"];
+                water_hour = aux;
+            }
+            if(jsonBody.containsKey("duration")){
+                aux = jsonBody["duration"];
+                water_duration = aux;
+            }
+            http_rest_server.send(200);
+        }
+
+    }else{
+        http_rest_server.send(400);
+    }
+}
+
+void reset_water(){
+    just_watered = false;
+    http_rest_server.send(200);
+}
+
 void post_leds() {
 
     StaticJsonBuffer<500> jsonBuffer;
@@ -157,7 +205,8 @@ void config_rest_server_routing() {
     http_rest_server.on("/time", HTTP_GET, get_system_time);
     http_rest_server.on("/time", HTTP_POST, set_system_time);
 
-
+    http_rest_server.on("/water", HTTP_POST, set_water_time);
+    http_rest_server.on("/water", HTTP_GET, reset_water);
 
 }
 
@@ -226,6 +275,12 @@ uint32_t getTime() {
   return UNIXTime;
 }
 
+void ICACHE_RAM_ATTR onTimerISR(){
+    // digitalWrite(LED_BUILTIN,!(digitalRead(LED_BUILTIN)));  //Toggle LED Pin
+    cookoo.run_on_interrupt();
+    timer1_write(312500);
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -284,27 +339,68 @@ if (hour < 0){
 cookoo.set_hour(hour);
 
 
+timer1_attachInterrupt(onTimerISR);
+timer1_enable(TIM_DIV256, TIM_EDGE, TIM_SINGLE);
+timer1_write(312500);
+
+pinMode(D6, OUTPUT);
 
 }
 
 
+
+
+void check_time(){
+
+    if(cookoo.get_hour() >= water_hour){
+        if(cookoo.get_minute() >= water_minute){
+            if(cookoo.get_second() >= water_second){
+                if(!just_watered){
+                    water_start = cookoo.get_second();
+                    digitalWrite(D6, HIGH);
+                    current_state = WATERING;
+                }
+            }
+        }
+    }
+
+
+}
+
+void water(){
+
+    if(cookoo.get_second() > water_start + water_duration)
+    {
+        just_watered = true;
+        digitalWrite(D6, LOW);
+        current_state = IDLE;
+    }
+
+}
+
 void loop() {
 
-    cookoo.run();
+    // cookoo.run();
 
     if(WiFi.status()== WL_CONNECTED)
     {
-      http_rest_server.handleClient();
+        http_rest_server.handleClient();
     }
     else
     {
-      ESP.reset();
+        ESP.reset();
     }
+
+
+    switch(current_state)
+    {
+        case IDLE  :  check_time();  break;
+        case WATERING : water(); break;
+    }
+
+
     run_blink();
     digitalWrite(LED_BUILTIN, led);
-
-
-
 
 
 }
